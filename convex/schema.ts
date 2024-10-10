@@ -7,8 +7,9 @@ import { v } from "convex/values";
 // The schema provides more precise TypeScript types.
 export default defineSchema({
   messages: defineTable({
-    id: v.string(),
+    localId: v.string(),
+    localCreatedAt: v.number(),
     author: v.string(),
     body: v.string(),
-  }),
+  }).index("byLocalId", ["localId"]),
 });

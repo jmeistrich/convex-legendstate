@@ -33,7 +33,8 @@ const obs$ = observable(() =>
   sync({
     convex,
     query: api.messages.list,
-    create: api.messages.send,
+    create: api.messages.create,
+    update: api.messages.update,
     persist: {
       name: "convexLS1",
     },
@@ -48,31 +49,42 @@ export const Chat = observer(function Chat({ viewer }: { viewer: string }) {
       convex: convexClient,
       query: api.messages.list,
       queryArgs: {}, // Optional
-      create: api.messages.send,
-      update: api.messages.send,
+      create: api.messages.create,
+      update: api.messages.update,
+      delete: api.messages.remove,
       persist: {
         name: "convexLS2",
       },
+      syncMode: "auto",
     }),
   );
 
   const messages = Object.values(obs$.get() || {});
   const messages2 = Object.values(obs2$.get() || {});
-
-  console.log("messages", messages2, messages);
+  messages2.sort((a, b) => b.localCreatedAt - a.localCreatedAt);
+  console.log("messages", messages, messages2);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setNewMessageText("");
-    const id = generateId();
-    obs$[id].assign({ id, body: newMessageText, author: viewer });
+    const localId = generateId();
+    obs2$[localId].assign({
+      localId,
+      localCreatedAt: Date.now(),
+      body: newMessageText,
+      author: viewer,
+    });
   };
 
   return (
     <>
-      <MessageList messages={messages}>
-        {messages?.map((message) => (
-          <Message key={message._id} author={message.author} viewer={viewer}>
+      <MessageList messages={messages2}>
+        {messages2?.map((message) => (
+          <Message
+            key={message.localId}
+            author={message.author}
+            viewer={viewer}
+          >
             {message.body}
           </Message>
         ))}

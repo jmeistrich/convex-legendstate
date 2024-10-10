@@ -18,7 +18,7 @@ interface SyncedConvexProps<
   Client extends ConvexClient | ConvexReactClient,
   Query extends FunctionReference<"query", "public", any, TRemote[]>,
   TOption extends CrudAsOption = "object",
-  TRemote extends { id: string } = Query["_returnType"][number],
+  TRemote extends { localId: string } = Query["_returnType"][number],
 > extends SyncedCrudPropsMany<TRemote, TRemote, TOption>,
     Omit<
       SyncedCrudPropsBase<TRemote, TRemote>,
@@ -27,16 +27,24 @@ interface SyncedConvexProps<
   convex: Client;
   query: Query;
   queryArgs?: FunctionArgs<Query>;
-  create?: FunctionReference<"mutation", "public", NoInfer<Partial<TRemote>>>;
-  update?: FunctionReference<"mutation", "public", NoInfer<Partial<TRemote>>>;
-  delete?: FunctionReference<"mutation", "public", NoInfer<Partial<TRemote>>>;
+  create?: FunctionReference<"mutation", "public", NoInfer<TRemote>>;
+  update?: FunctionReference<
+    "mutation",
+    "public",
+    NoInfer<Partial<TRemote> & { localId: string }>
+  >;
+  delete?: FunctionReference<
+    "mutation",
+    "public",
+    NoInfer<{ localId: string }>
+  >;
 }
 
 export function syncedConvex<
   Client extends ConvexClient | ConvexReactClient,
   Query extends FunctionReference<"query", "public", any, TRemote[]>,
   TOption extends CrudAsOption = "object",
-  TRemote extends { id: string } = Query["_returnType"][number],
+  TRemote extends { localId: string } = Query["_returnType"][number],
 >(
   props: SyncedConvexProps<Client, Query, TOption, TRemote>,
 ): SyncedCrudReturnType<TRemote, TOption> {
@@ -62,14 +70,16 @@ export function syncedConvex<
 
   const subscribe = (params: SyncedSubscribeParams<TRemote[]>) => {
     if ((convex as ConvexReactClient).watchQuery) {
+      console.log("subscribe");
       const convexReactClient = convex as ConvexReactClient;
-      const watch = convexReactClient.watchQuery(query, {});
-      watch.onUpdate(() => {
-        const value = watch.localQueryResult() as any;
-        params.update({ value });
+      const watch = convexReactClient.watchQuery(query, queryArgs);
+      return watch.onUpdate(() => {
+        // It's okay to just refresh() since we're guaranteed that the subsequent
+        // `list` will read from the local cache.
+        params.refresh();
       });
     } else {
-      (convex as ConvexClient)?.onUpdate(query, queryArgs, (result) => {
+      return (convex as ConvexClient)?.onUpdate(query, queryArgs, (result) => {
         params.update({
           value: result,
         });
@@ -78,34 +88,41 @@ export function syncedConvex<
   };
 
   const list = async (params: SyncedGetParams<TRemote>) => {
-    const results = await convex.query(query, {});
-    console.log("list", results);
+    const results = await convex.query(query, queryArgs);
+    console.log("listed", results);
     return results;
   };
 
-  const createMutation =
-    (mutator: FunctionReference<"mutation">) => async (value: TRemote) => {
-      const results = await convex.mutation(mutator, value);
-      console.log("mutation", results);
-      return results;
-    };
-
-  const create = createParam ? createMutation(createParam) : undefined;
-  const update = updateParam ? createMutation(updateParam) : undefined;
-  const deleteFn = deleteParam ? createMutation(deleteParam) : undefined;
-
   return syncedCrud({
     ...rest,
-    mode: mode || "merge",
+    mode: mode || "set",
     list,
-    create,
-    update,
-    delete: deleteFn,
+    create: async (input: TRemote) => {
+      if (createParam) {
+        const result = await convex.mutation(createParam, input);
+        console.log("create", input, result);
+        return result;
+      }
+    },
+    update: async (input: Partial<TRemote> & { localId: string }) => {
+      if (updateParam) {
+        const result = await convex.mutation(updateParam, input);
+        console.log("update", input, result);
+        return result;
+      }
+    },
+    delete: async (input: { localId: string }) => {
+      if (deleteParam) {
+        const result = await convex.mutation(deleteParam, input);
+        console.log("delete", input, result);
+        return result;
+      }
+    },
     fieldCreatedAt: "_creationTime",
     // fieldUpdatedAt,
     // fieldDeleted,
     updatePartial: false,
-    fieldId: "id",
+    fieldId: "localId",
     subscribe,
     generateId,
   });
